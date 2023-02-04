@@ -32,9 +32,9 @@ int main(int argc, char **argv)
 
   while (1)
   {
-    char *input = readline("lispy> ");
+    char *input = readline("plisp> ");
     add_history(input);
-    printf("No you're a %s\n", input);
+    printf("You said %s!\n", input);
     free(input);
   }
 
