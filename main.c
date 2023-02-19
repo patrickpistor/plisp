@@ -25,6 +25,41 @@ void add_history(char *unused) {}
 #include <readline/readline.h>
 #endif
 
+long eval_op(long x, char *op, long y)
+{
+  if (strcmp(op, "+") == 0)
+    return x + y;
+  if (strcmp(op, "-") == 0)
+    return x - y;
+  if (strcmp(op, "*") == 0)
+    return x * y;
+  if (strcmp(op, "/") == 0)
+    return x / y;
+  if (strcmp(op, "%") == 0)
+    return x % y;
+  return 0;
+}
+
+long eval(mpc_ast_t *t)
+{
+  if (strstr(t->tag, "number"))
+  {
+    return atoi(t->contents);
+  }
+
+  char *op = t->children[1]->contents;
+  long x = eval(t->children[2]);
+
+  int i = 3;
+  while (strstr(t->children[i]->tag, "expr"))
+  {
+    x = eval_op(x, op, eval(t->children[i]));
+    i++;
+  }
+
+  return x;
+}
+
 int main(int argc, char **argv)
 {
 
@@ -34,9 +69,9 @@ int main(int argc, char **argv)
   mpc_parser_t *PLisp = mpc_new("lisp");
 
   mpca_lang(MPCA_LANG_DEFAULT,
-            "                                                     \
-    number   : /-?[0-9]+(\\.[0-9]+)?/ ;                    \
-    operator : '+' | '-' | '*' | '/' | '%' ;                    \
+            "                                             \
+    number   : /-?[0-9]+(\\.[0-9]+)?/ ;                   \
+    operator : '+' | '-' | '*' | '/' | '%' ;              \
     expr     : <number> | '(' <operator> <expr>+ ')' ;    \
     lisp     : /^/ <operator> <expr>+ /$/ ;               \
   ",
@@ -53,13 +88,12 @@ int main(int argc, char **argv)
     add_history(input);
     if (mpc_parse("<stdin>", input, PLisp, &r))
     {
-      /* On Success Print the AST */
-      mpc_ast_print(r.output);
+      long result = eval(r.output);
+      printf("%li\n", result);
       mpc_ast_delete(r.output);
     }
     else
     {
-      /* Otherwise Print the Error */
       mpc_err_print(r.error);
       mpc_err_delete(r.error);
     }

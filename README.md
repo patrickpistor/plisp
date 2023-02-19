@@ -1,4 +1,4 @@
-# plisp
+# p(retty-good)lisp
 
 Start of a Lisp based programming language I am building for fun
 
