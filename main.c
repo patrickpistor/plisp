@@ -25,119 +25,315 @@ void add_history(char *unused) {}
 #include <readline/readline.h>
 #endif
 
-typedef struct
+typedef struct pval
 {
   int type;
   long num;
-  int err;
-} lval;
+  char *err;
+  char *sym;
+  int count;
+  struct pval **cell;
+} pval;
+
+void pval_print(pval *v);
 
 enum
 {
-  LVAL_NUM,
-  LVAL_ERR
+  PVAL_ERR,
+  PVAL_NUM,
+  PVAL_SYM,
+  PVAL_SEXPR
 };
 enum
 {
-  LERR_DIV_ZERO,
-  LERR_BAD_OP,
-  LERR_BAD_NUM
+  PERR_DIV_ZERO,
+  PERR_BAD_OP,
+  PERR_BAD_NUM
 };
 
-lval lval_num(long x)
+pval *pval_num(long x)
 {
-  lval v;
-  v.type = LVAL_NUM;
-  v.num = x;
+  pval *v = malloc(sizeof(pval));
+  v->type = PVAL_NUM;
+  v->num = x;
   return v;
 }
 
-lval lval_err(int x)
+pval *pval_err(char *m)
 {
-  lval v;
-  v.type = LVAL_ERR;
-  v.err = x;
+  pval *v = malloc(sizeof(pval));
+  v->type = PVAL_ERR;
+  v->err = malloc(strlen(m) + 1);
+  strcpy(v->err, m);
   return v;
 }
 
-void lval_print(lval v)
+pval *pval_sym(char *s)
 {
-  switch (v.type)
+  pval *v = malloc(sizeof(pval));
+  v->type = PVAL_SYM;
+  v->sym = malloc(strlen(s) + 1);
+  strcpy(v->sym, s);
+  return v;
+}
+
+pval *pval_sexpr(void)
+{
+  pval *v = malloc(sizeof(pval));
+  v->type = PVAL_SEXPR;
+  v->count = 0;
+  v->cell = NULL;
+  return v;
+}
+
+void pval_del(pval *v)
+{
+
+  switch (v->type)
   {
-  case LVAL_NUM:
-    printf("%li", v.num);
+  case PVAL_NUM:
     break;
-  case LVAL_ERR:
-    if (v.err == LERR_DIV_ZERO)
+
+  case PVAL_ERR:
+    free(v->err);
+    break;
+  case PVAL_SYM:
+    free(v->sym);
+    break;
+
+  case PVAL_SEXPR:
+    for (int i = 0; i < v->count; i++)
     {
-      printf("Error: Division by Zero!");
+      pval_del(v->cell[i]);
     }
-    if (v.err == LERR_BAD_OP)
-    {
-      printf("Error: Invalid Operator!");
-    }
-    if (v.err == LERR_BAD_NUM)
-    {
-      printf("Error: Invalid Number!");
-    }
+    free(v->cell);
     break;
   }
+
+  free(v);
 }
 
-void lval_println(lval v)
+pval *pval_read_num(mpc_ast_t *t)
 {
-  lval_print(v);
-  putchar('\n');
+  errno = 0;
+  long x = strtol(t->contents, NULL, 10);
+  return errno != ERANGE ? pval_num(x) : pval_err("invalid number");
 }
 
-lval eval_op(lval x, char *op, lval y)
-{
-  if (x.type == LVAL_ERR)
-  {
-    return x;
-  }
-  if (y.type == LVAL_ERR)
-  {
-    return y;
-  }
-
-  if (strcmp(op, "+") == 0)
-    return lval_num(x.num + y.num);
-  if (strcmp(op, "-") == 0)
-    return lval_num(x.num - y.num);
-  if (strcmp(op, "*") == 0)
-    return lval_num(x.num * y.num);
-  if (strcmp(op, "/") == 0)
-    return y.num == 0
-               ? lval_err(LERR_DIV_ZERO)
-               : lval_num(x.num / y.num);
-  if (strcmp(op, "%") == 0)
-    return y.num == 0
-               ? lval_err(LERR_DIV_ZERO)
-               : lval_num(x.num % y.num);
-
-  return lval_err(LERR_BAD_OP);
-}
-
-lval eval(mpc_ast_t *t)
+pval *pval_read(mpc_ast_t *t)
 {
   if (strstr(t->tag, "number"))
   {
-    errno = 0;
-    long x = strtol(t->contents, NULL, 10);
-    return errno != ERANGE ? lval_num(x) : lval_err(LERR_BAD_NUM);
+    return pval_read_num(t);
   }
-
-  char *op = t->children[1]->contents;
-  lval x = eval(t->children[2]);
-
-  int i = 3;
-  while (strstr(t->children[i]->tag, "expr"))
+  if (strstr(t->tag, "symbol"))
   {
-    x = eval_op(x, op, eval(t->children[i]));
-    i++;
+    return pval_sym(t->contents);
   }
 
+  pval *x = NULL;
+  if (strcmp(t->tag, ">") == 0)
+  {
+    x = pval_sexpr();
+  }
+  if (strstr(t->tag, "sexpr"))
+  {
+    x = pval_sexpr();
+  }
+
+  for (int i = 0; i < t->children_num; i++)
+  {
+    if (strcmp(t->children[i]->contents, "(") == 0)
+    {
+      continue;
+    }
+    if (strcmp(t->children[i]->contents, ")") == 0)
+    {
+      continue;
+    }
+    if (strcmp(t->children[i]->tag, "regex") == 0)
+    {
+      continue;
+    }
+    x = pval_add(x, pval_read(t->children[i]));
+  }
+
+  return x;
+}
+
+pval *pval_add(pval *v, pval *x)
+{
+  v->count++;
+  v->cell = realloc(v->cell, sizeof(pval *) * v->count);
+  v->cell[v->count - 1] = x;
+  return v;
+}
+
+void pval_expr_print(pval *v, char open, char close)
+{
+  putchar(open);
+  for (int i = 0; i < v->count; i++)
+  {
+
+    /* Print Value contained within */
+    pval_print(v->cell[i]);
+
+    /* Don't print trailing space if last element */
+    if (i != (v->count - 1))
+    {
+      putchar(' ');
+    }
+  }
+  putchar(close);
+}
+
+void pval_print(pval *v)
+{
+  switch (v->type)
+  {
+  case PVAL_NUM:
+    printf("%li", v->num);
+    break;
+  case PVAL_ERR:
+    printf("Error: %s", v->err);
+    break;
+  case PVAL_SYM:
+    printf("%s", v->sym);
+    break;
+  case PVAL_SEXPR:
+    pval_expr_print(v, '(', ')');
+    break;
+  }
+}
+
+void pval_println(pval *v)
+{
+  pval_print(v);
+  putchar('\n');
+}
+
+pval *pval_eval_sexpr(pval *v)
+{
+
+  for (int i = 0; i < v->count; i++)
+  {
+    v->cell[i] = pval_eval(v->cell[i]);
+  }
+
+  for (int i = 0; i < v->count; i++)
+  {
+    if (v->cell[i]->type == PVAL_ERR)
+    {
+      return pval_take(v, i);
+    }
+  }
+
+  if (v->count == 0)
+  {
+    return v;
+  }
+
+  if (v->count == 1)
+  {
+    return pval_take(v, 0);
+  }
+
+  pval *f = pval_pop(v, 0);
+  if (f->type != PVAL_SYM)
+  {
+    pval_del(f);
+    pval_del(v);
+    return pval_err("S-expression Does not start with symbol!");
+  }
+
+  pval *result = builtin_op(v, f->sym);
+  pval_del(f);
+
+  return result;
+}
+
+pval *pval_eval(pval *v)
+{
+  if (v->type == PVAL_SEXPR)
+  {
+    return pval_eval_sexpr(v);
+  }
+
+  return v;
+}
+
+pval *pval_pop(pval *v, int i)
+{
+  pval *x = v->cell[i];
+
+  memmove(&v->cell[i], &v->cell[i + 1],
+          sizeof(pval *) * (v->count - i - 1));
+
+  v->count--;
+
+  v->cell = realloc(v->cell, sizeof(pval *) * v->count);
+  return x;
+}
+
+pval *pval_take(pval *v, int i)
+{
+  pval *x = pval_pop(v, i);
+  pval_del(v);
+  return x;
+}
+
+pval *builtin_op(pval *a, char *op)
+{
+
+  for (int i = 0; i < a->count; i++)
+  {
+    if (a->cell[i]->type != PVAL_NUM)
+    {
+      pval_del(a);
+      return pval_err("Cannot operate on non-number!");
+    }
+  }
+
+  pval *x = pval_pop(a, 0);
+
+  if ((strcmp(op, "-") == 0) && a->count == 0)
+  {
+    x->num = -x->num;
+  }
+
+  while (a->count > 0)
+  {
+
+    pval *y = pval_pop(a, 0);
+
+    if (strcmp(op, "+") == 0)
+    {
+      x->num += y->num;
+    }
+    if (strcmp(op, "-") == 0)
+    {
+      x->num -= y->num;
+    }
+    if (strcmp(op, "*") == 0)
+    {
+      x->num *= y->num;
+    }
+    if (strcmp(op, "/") == 0)
+    {
+      if (y->num == 0)
+      {
+        pval_del(x);
+        pval_del(y);
+        x = pval_err("Division By Zero!");
+        break;
+      }
+      x->num /= y->num;
+    }
+
+    pval_del(y);
+  }
+
+  pval_del(a);
   return x;
 }
 
@@ -145,18 +341,20 @@ int main(int argc, char **argv)
 {
 
   mpc_parser_t *Number = mpc_new("number");
-  mpc_parser_t *Operator = mpc_new("operator");
+  mpc_parser_t *Symbol = mpc_new("symbol");
+  mpc_parser_t *Sexpr = mpc_new("sexpr");
   mpc_parser_t *Expr = mpc_new("expr");
-  mpc_parser_t *PLisp = mpc_new("lisp");
+  mpc_parser_t *PLisp = mpc_new("lispy");
 
   mpca_lang(MPCA_LANG_DEFAULT,
-            "                                             \
-    number   : /-?[0-9]+(\\.[0-9]+)?/ ;                   \
-    operator : '+' | '-' | '*' | '/' | '%' ;              \
-    expr     : <number> | '(' <operator> <expr>+ ')' ;    \
-    lisp     : /^/ <operator> <expr>+ /$/ ;               \
+            "                                          \
+    number : /-?[0-9]+/ ;                    \
+    symbol : '+' | '-' | '*' | '/' ;         \
+    sexpr  : '(' <expr>* ')' ;               \
+    expr   : <number> | <symbol> | <sexpr> ; \
+    lispy  : /^/ <expr>* /$/ ;               \
   ",
-            Number, Operator, Expr, PLisp);
+            Number, Symbol, Sexpr, Expr, PLisp);
 
   puts("Plisp Version 0.0.0.0.1");
   puts("Press Ctrl+c to Exit\n");
@@ -169,9 +367,9 @@ int main(int argc, char **argv)
     add_history(input);
     if (mpc_parse("<stdin>", input, PLisp, &r))
     {
-      lval result = eval(r.output);
-      lval_println(result);
-      mpc_ast_delete(r.output);
+      pval *x = pval_eval(pval_read(r.output));
+      pval_println(x);
+      pval_del(x);
     }
     else if (strcmp(input, "exit") == 0)
     {
@@ -189,6 +387,6 @@ int main(int argc, char **argv)
     free(input);
   }
 
-  mpc_cleanup(4, Number, Operator, Expr, PLisp);
+  mpc_cleanup(5, Number, Symbol, Sexpr, Expr, PLisp);
   return 0;
 }
