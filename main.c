@@ -26,7 +26,8 @@ enum
   PVAL_ERR,
   PVAL_NUM,
   PVAL_SYM,
-  PVAL_SEXPR
+  PVAL_SEXPR,
+  PVAL_QEXPR
 };
 
 typedef struct pval
@@ -74,16 +75,23 @@ pval *pval_sexpr(void)
   return v;
 }
 
+pval *pval_qexpr(void)
+{
+  pval *v = malloc(sizeof(pval));
+  v->type = PVAL_QEXPR;
+  v->count = 0;
+  v->cell = NULL;
+  return v;
+}
+
 void pval_del(pval *v)
 {
 
   switch (v->type)
   {
-  /* Do nothing special for number type */
   case PVAL_NUM:
     break;
 
-  /* For Err or Sym free the string data */
   case PVAL_ERR:
     free(v->err);
     break;
@@ -91,6 +99,7 @@ void pval_del(pval *v)
     free(v->sym);
     break;
 
+  case PVAL_QEXPR:
   case PVAL_SEXPR:
     for (int i = 0; i < v->count; i++)
     {
@@ -164,6 +173,9 @@ void pval_print(pval *v)
     break;
   case PVAL_SEXPR:
     pval_expr_print(v, '(', ')');
+    break;
+  case PVAL_QEXPR:
+    pval_expr_print(v, '{', '}');
     break;
   }
 }
@@ -307,6 +319,10 @@ pval *pval_read(mpc_ast_t *t)
   {
     x = pval_sexpr();
   }
+  if (strstr(t->tag, "qexpr"))
+  {
+    x = lval_qexpr();
+  }
 
   for (int i = 0; i < t->children_num; i++)
   {
@@ -315,6 +331,14 @@ pval *pval_read(mpc_ast_t *t)
       continue;
     }
     if (strcmp(t->children[i]->contents, ")") == 0)
+    {
+      continue;
+    }
+    if (strcmp(t->children[i]->contents, "}") == 0)
+    {
+      continue;
+    }
+    if (strcmp(t->children[i]->contents, "{") == 0)
     {
       continue;
     }
@@ -334,6 +358,7 @@ int main(int argc, char **argv)
   mpc_parser_t *Number = mpc_new("number");
   mpc_parser_t *Symbol = mpc_new("symbol");
   mpc_parser_t *Sexpr = mpc_new("sexpr");
+  mpc_parser_t *Qexpr = mpc_new("qexpr");
   mpc_parser_t *Expr = mpc_new("expr");
   mpc_parser_t *Plisp = mpc_new("plisp");
 
@@ -342,7 +367,8 @@ int main(int argc, char **argv)
       number : /-?[0-9]+/ ;                    \
       symbol : '+' | '-' | '*' | '/' ;         \
       sexpr  : '(' <expr>* ')' ;               \
-      expr   : <number> | <symbol> | <sexpr> ; \
+      qexpr  : '{' <expr>* '}' ;               \
+      expr   : <number> | <symbol> | <sexpr> | <qexpr> ; \
       plisp  : /^/ <expr>* /$/ ;               \
     ",
             Number, Symbol, Sexpr, Expr, Plisp);
@@ -381,7 +407,7 @@ int main(int argc, char **argv)
     free(input);
   }
 
-  mpc_cleanup(5, Number, Symbol, Sexpr, Expr, Plisp);
+  mpc_cleanup(5, Number, Symbol, Sexpr, Qexpr, Expr, Plisp);
 
   return 0;
 }
