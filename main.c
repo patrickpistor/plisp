@@ -186,6 +186,97 @@ void pval_println(pval *v)
   putchar('\n');
 }
 
+pval *pval_eval(pval *v);
+
+#define PASSERT(args, cond, err) \
+  if (!(cond))                   \
+  {                              \
+    pval_del(args);              \
+    return pval_err(err);        \
+  }
+
+pval *builtin_head(pval *a)
+{
+  PASSERT(a, a->count == 1,
+          "Function 'head' passed too many arguments!");
+  PASSERT(a, a->cell[0]->type == PVAL_QEXPR,
+          "Function 'head' passed incorrect type!");
+  PASSERT(a, a->cell[0]->count != 0,
+          "Function 'head' passed {}!");
+
+  pval *v = pval_take(a, 0);
+
+  while (v->count > 1)
+  {
+    pval_del(pval_pop(v, 1));
+  }
+  return v;
+}
+
+pval *builtin_tail(pval *a)
+{
+  PASSERT(a, a->count == 1,
+          "Function 'tail' passed too many arguments!");
+  PASSERT(a, a->cell[0]->type == PVAL_QEXPR,
+          "Function 'tail' passed incorrect type!");
+  PASSERT(a, a->cell[0]->count != 0,
+          "Function 'tail' passed {}!");
+
+  pval *v = pval_take(a, 0);
+
+  pval_del(pval_pop(v, 0));
+  return v;
+}
+
+pval *builtin_list(pval *a)
+{
+  a->type = PVAL_QEXPR;
+  return a;
+}
+
+pval *builtin_eval(pval *a)
+{
+  PASSERT(a, a->count == 1,
+          "Function 'eval' passed too many arguments!");
+  PASSERT(a, a->cell[0]->type == PVAL_QEXPR,
+          "Function 'eval' passed incorrect type!");
+
+  pval *x = pval_take(a, 0);
+  x->type = PVAL_SEXPR;
+  return pval_eval(x);
+}
+
+pval *pval_join(pval *x, pval *y)
+{
+  while (y->count)
+  {
+    x = pval_add(x, pval_pop(y, 0));
+  }
+
+  pval_del(y);
+  return x;
+}
+
+pval *builtin_join(pval *a)
+{
+
+  for (int i = 0; i < a->count; i++)
+  {
+    PASSERT(a, a->cell[i]->type == PVAL_QEXPR,
+            "Function 'join' passed incorrect type.");
+  }
+
+  pval *x = pval_pop(a, 0);
+
+  while (a->count)
+  {
+    x = pval_join(x, pval_pop(a, 0));
+  }
+
+  pval_del(a);
+  return x;
+}
+
 pval *builtin_op(pval *a, char *op)
 {
 
@@ -241,7 +332,35 @@ pval *builtin_op(pval *a, char *op)
   return x;
 }
 
-pval *pval_eval(pval *v);
+pval *builtin(pval *a, char *func)
+{
+  if (strcmp("list", func) == 0)
+  {
+    return builtin_list(a);
+  }
+  if (strcmp("head", func) == 0)
+  {
+    return builtin_head(a);
+  }
+  if (strcmp("tail", func) == 0)
+  {
+    return builtin_tail(a);
+  }
+  if (strcmp("join", func) == 0)
+  {
+    return builtin_join(a);
+  }
+  if (strcmp("eval", func) == 0)
+  {
+    return builtin_eval(a);
+  }
+  if (strstr("+-/*", func))
+  {
+    return builtin_op(a, func);
+  }
+  pval_del(a);
+  return pval_err("Unknown Function!");
+}
 
 pval *pval_eval_sexpr(pval *v)
 {
@@ -277,7 +396,7 @@ pval *pval_eval_sexpr(pval *v)
     return pval_err("S-expression Does not start with symbol.");
   }
 
-  pval *result = builtin_op(v, f->sym);
+  pval *result = builtin(v, f->sym);
   pval_del(f);
   return result;
 }
@@ -321,7 +440,7 @@ pval *pval_read(mpc_ast_t *t)
   }
   if (strstr(t->tag, "qexpr"))
   {
-    x = lval_qexpr();
+    x = pval_qexpr();
   }
 
   for (int i = 0; i < t->children_num; i++)
@@ -363,14 +482,15 @@ int main(int argc, char **argv)
   mpc_parser_t *Plisp = mpc_new("plisp");
 
   mpca_lang(MPCA_LANG_DEFAULT,
-            "                                          \
-      number : /-?[0-9]+/ ;                    \
-      symbol : '+' | '-' | '*' | '/' ;         \
-      sexpr  : '(' <expr>* ')' ;               \
-      qexpr  : '{' <expr>* '}' ;               \
-      expr   : <number> | <symbol> | <sexpr> | <qexpr> ; \
-      plisp  : /^/ <expr>* /$/ ;               \
-    ",
+            "                                                        \
+    number : /-?[0-9]+/ ;                                  \
+    symbol : \"list\" | \"head\" | \"tail\"                \
+           | \"join\" | \"eval\" | '+' | '-' | '*' | '/' ; \
+    sexpr  : '(' <expr>* ')' ;                             \
+    qexpr  : '{' <expr>* '}' ;                             \
+    expr   : <number> | <symbol> | <sexpr> | <qexpr> ;     \
+    plisp  : /^/ <expr>* /$/ ;                             \
+  ",
             Number, Symbol, Sexpr, Expr, Plisp);
 
   puts("Plisp Version 0.0.0.0.5");
